@@ -1,0 +1,25 @@
+from datetime import datetime as dt
+from meteostat import Daily, Stations
+import pandas as pd
+
+def station_data(ccode, name, start, end): # takes country code, station name, start and end dates
+    ccode = str(ccode); name = str(name)
+
+    stations = Stations()
+    stations = stations.region(ccode)
+    nb_stations = stations.count()
+    stationss = stations.fetch(nb_stations)
+    for i in range(int(nb_stations)):
+        if  stationss["name"].iloc[i] == name : 
+            stat_id=stationss.index[i];
+        
+    if stat_id in stat_id:
+        lat = stationss.at[stat_id, 'latitude']
+        long = stationss.at[stat_id, 'longitude']
+    else: print("Station not Found")
+    
+    station = stations.nearby(lat,long)
+    station = station.fetch(1)
+    station_data = Daily(station.index[0], start, end).fetch()
+    
+    return station_data # returns the data of the found station from the given dates 
