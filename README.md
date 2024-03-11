@@ -1,6 +1,7 @@
 The purpose of this project is to visually and quantitatively show the points of condensation in a user-defined wall.
 
-All data and equations were taken from ***********'s Thermodynamics course at INSA Strasbourg (citation still to be approved)
+All data and equations were taken from ***********'s Applied Thermodynamics course at INSA Strasbourg (citation still to be approved).
+Some early versions might have some language inconsistencies since this course was taught in french. 
 
 Version 0.1: The most basic possible version of the code.
 - Includes most of the relevant calculations required to get a temperature (and therefore pressure) evolution across the wall
@@ -24,6 +25,7 @@ Version 1: Fully functional code with little to no extra functionalities.
   - will improve the visualisation with labels and/or textures for different materials
   - improve the LayerData file to make the types of material clearer
   - improve user interface
+
 
 Version 2 (Future version): will build upon the latest v1 by adding extra functionalities
 - use of the 'Meteostat_import_station_data' function included in the project files to be able to determine the validity of the model for different parts of the year for a given location in the world
