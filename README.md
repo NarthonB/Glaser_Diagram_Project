@@ -1,7 +1,11 @@
 The purpose of this project is to visually and quantitatively show the points of condensation in a user-defined wall.
 
-All data and equations were taken from ***********'s Applied Thermodynamics course at INSA Strasbourg (citation still to be approved).
+All data and equations were taken from the Applied Thermodynamics course taken at INSA Strasbourg (cited below).
 Some early versions might have some language inconsistencies since this course was taught in french. 
+
+Walther, E. (2024). _Thermodynamique Appliquée; Air Humide et Transfert de Masse_ [Class Handout]. Retrieved from https://moodle.insa-strasbourg.fr/course/view.php?id=1251
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 Version 0.1: The most basic possible version of the code.
 - Includes most of the relevant calculations required to get a temperature (and therefore pressure) evolution across the wall
