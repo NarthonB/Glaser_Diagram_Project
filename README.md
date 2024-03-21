@@ -24,6 +24,10 @@ Version 1: Fully functional code with little to no extra functionalities.
   - clearly commented blocks of code
   - improved variable names
 
+  v1.2: Layer Properties and Internal/External Conditions assigned to DataFrames.
+  - Clearer to differentiate constant and manipulated variables.
+  - CONCERN: While more organised, lines of code are much more long-winded. Could make code visually harder to understand.
+
   v1.?: (list of planned features to be added during the v1 phase)
   - will integrate a choice of a permeable coating to mitigate condensation
   - will improve the visualisation with labels and/or textures for different materials
@@ -31,7 +35,7 @@ Version 1: Fully functional code with little to no extra functionalities.
   - improve user interface
 
 
-Version 2 (Future version): will build upon the latest v1 by adding extra functionalities
+Version 2 (Future version): will build upon the most updated v1; adding extra functionalities to base code
 - use of the 'Meteostat_import_station_data' function included in the project files to be able to determine the validity of the model for different parts of the year for a given location in the world
 - estimate how the materials will be affected by the condensation over time
 - cost analysis
