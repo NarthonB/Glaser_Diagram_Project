@@ -89,8 +89,6 @@ Layers = pd.DataFrame(layer_data, columns=Layers_column_names)
 Layers.columns = Layers_column_names
 Layers.index = Layers_row_names
 
-ghd = sum(Layers['Rth'])
-
 ## Heat and Moisture Transfer
 Rth_total = (1/Conditions.Convection['Internal']) + sum(Layers['Rth']) + (1/Conditions.Convection['External'])
 thermal_flow = (1/Rth_total) * (Conditions.Temperature['Internal']-Conditions.Temperature['External']) 
