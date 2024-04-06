@@ -1,3 +1,7 @@
-﻿,k,pi
-LdV,0.045,1.50E-10
-Concrete,1.4,5.60E+12
+﻿MATERIAL,k,pi, ID
+Glass Wool,             0.045,  1.50E-10,   0
+Concrete,               1.4,    5.60E-12,   1
+Brick,                  0.5,    1.90E-11,   2
+Expanded Polystyrene,   0.03,   8.30E-12,   3
+Wood,                   0.2,    9.40E-12,   4
+Plaster,                0.46,   9.70E-09,   5
