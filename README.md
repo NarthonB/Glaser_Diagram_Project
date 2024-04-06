@@ -28,6 +28,26 @@ Version 1: Fully functional code with little to no extra functionalities.
   - Clearer to differentiate constant and manipulated variables.
   - CONCERN: While more organised, lines of code are much more long-winded. Could make code visually harder to understand.
 
+  v1.3: 
+  - reorganised code, some variable name changes and improved commenting
+  - defined equations separately from the main code
+  - changed layers dataframe
+  - added a function to find condensation point(s)
+  - added convection coefficient equation depending on terms of air speed
+
+v1.4:
+  - condensed all final data into a dataframe
+  - changed plotting function to take df and layer bounds as input (hopefully make this part of df in future)
+  - Add vapour barrier
+    - changed vapour flow equation to include addition of a VB
+  - changed equation for checking layer (not sure why/how it worked before)
+  - reduced number of variables
+  - created a separate rounding function
+  - Improved plot display
+    - created a colour-picking function to clarify different materials
+    - made separations clearer
+  - Reorganised some code
+
   v1.?: (list of planned features to be added during the v1 phase)
   - will integrate a choice of a permeable coating to mitigate condensation
   - will improve the visualisation with labels and/or textures for different materials
