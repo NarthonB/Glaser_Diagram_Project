@@ -219,11 +219,10 @@ thermal_flow = Total_flow(Rth_total, Conditions.Temperature['Internal'], Conditi
 Magnitude = np.floor(np.log10(thck_tot))    # determine the order of magnitude
 ticks = (10**Magnitude)/100;                # assures the graph will always have the correct amount of ticks
 # ticks = 0.001;                            # manual choice of ticks
-
 iterations = roundup(thck_tot/ticks)
 
 # Arrays containing layer boundaries
-layer_boundaries_real = [sum(thck[:i]) for i in range(n+1)]                 # array indicating each layer boundary
+layer_boundaries_real = [round(sum(thck[:i]), 5) for i in range(n+1)]                 # array indicating each layer boundary
 layer_boundaries_iters = [roundup(sum(thck[:i])/ticks) for i in range(n+1)]      # layer boundaries in terms of number of iterations
 # print(layer_boundaries_real)
 # print(layer_boundaries_iters)
