@@ -58,7 +58,7 @@ def colourpicker(Material_Name):
     elif Material_Name == 'Plaster': return '#90908c'
     else: return 'white'
 
-def roundup(number):
+def rounduptoint(number):
     '''Rounds up float values to nearest integer'''
     return int(-((-number)//1))
 
@@ -219,11 +219,11 @@ thermal_flow = Total_flow(Rth_total, Conditions.Temperature['Internal'], Conditi
 Magnitude = np.floor(np.log10(thck_tot))    # determine the order of magnitude
 ticks = (10**Magnitude)/100;                # assures the graph will always have the correct amount of ticks
 # ticks = 0.001;                            # manual choice of ticks
-iterations = roundup(thck_tot/ticks)
+iterations = rounduptoint(thck_tot/ticks)
 
 # Arrays containing layer boundaries
 layer_boundaries_real = [round(sum(thck[:i]), 5) for i in range(n+1)]                 # array indicating each layer boundary
-layer_boundaries_iters = [roundup(sum(thck[:i])/ticks) for i in range(n+1)]      # layer boundaries in terms of number of iterations
+layer_boundaries_iters = [rounduptoint(sum(thck[:i])/ticks) for i in range(n+1)]      # layer boundaries in terms of number of iterations
 # print(layer_boundaries_real)
 # print(layer_boundaries_iters)
 
@@ -259,7 +259,8 @@ pvs_vals.append(Conditions.SatVapPressure['External'])
 pv_vals.append(Conditions.VapPressure['External'])
 
 ###! DATAFRAME CONVERSION
-x_vals = np.arange(0, thck_tot+ticks, ticks); x_vals[-1] = round(x_vals[-1], 2)
+x_vals = np.arange(0, round(thck_tot+ticks, 5), ticks); 
+x_vals = np.round(x_vals, 5)
 Layer_num = [determine_layer_num(x, layer_boundaries_real) for x in x_vals]
 
 Final_df = pd.DataFrame(
@@ -272,7 +273,7 @@ Final_df = pd.DataFrame(
 Final_df.set_index('Thickness', inplace=True)
 
 # pd.set_option("display.max_rows", None)
-print(Final_df)
+# print(Final_df)
 
 ###! FINAL CALCULATIONS
 
