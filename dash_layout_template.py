@@ -5,7 +5,8 @@
 # visit http://127.0.0.1:8050/ in your web browser.
 
 
-# from dash import Dash, html, dcc, Input, Output, callback
+import dash
+from dash import Dash, html, dcc, Input, Output, callback, State
 # import plotly.express as px
 import numpy as np, pandas as pd
 # import plotly.graph_objects as go, plotly.subplots as sp
@@ -15,47 +16,45 @@ import numpy as np, pandas as pd
 # Layer_Data = pd.read_csv('projectData/LayerData.csv')
 MaterialData = pd.read_csv('projectData/LayerData.csv')
 
-
-import dash
-import dash_core_components as dcc
-import dash_html_components as html
-from dash.dependencies import Input, Output, State
-
 MAX_LAYERS = 10
-app = dash.Dash(__name__)
+app = Dash(__name__)
 
 app.layout = html.Div([
     html.H1('Layer Data Input'),
-    html.P('Enter data for each layer:'),
+    # html.P('Enter data for each layer:'),
     html.Div(id='layer-inputs'),
-    html.P('Number of layers:'),
-    dcc.Input(
-        id='n-layers',
-        type='number',
-        value=1
+    html.Button(
+        id='add-layer',
+        children='Add Layer',
+        n_clicks=0
     ),
     html.Div(id='output')
 ])
 
 @app.callback(
     Output('layer-inputs', 'children'),
-    [Input('n-layers', 'value')]
+    [Input('add-layer', 'n_clicks')],
+    [State('layer-inputs', 'children')]
 )
-def generate_layer_inputs(n):
-    inputs = []
-    for i in range(n):
+def generate_layer_inputs(n_clicks, children):
+    if children is None:
+        inputs = []
+    else: inputs = children
+    
+    if n_clicks > 0:
+        last_index = len(inputs)
         inputs.append(html.Div([
-            html.H2(f'Layer {i+1}:'),
+            html.H2(f'Layer {last_index+1}:'),
             html.P('Select material:'),
             dcc.Dropdown(
-                id=f'material-{i}',
+                id=f'material-{last_index}',
                 options=[{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
             ),
             html.P('Enter layer thickness [m]:'),
             dcc.Input(
-                id=f'thickness-{i}',
+                id=f'thickness-{last_index}',
                 type='number',
-                value=0
+                value=0,
             )
         ]))
     return inputs
