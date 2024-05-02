@@ -1,7 +1,13 @@
+#%%
+from datetime import datetime as dt
+from meteostat import Daily, Stations
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+from dash import Dash, html, dcc, Input, Output, callback, ALL, Patch, State, dash_table
+import plotly.express as px
 
 ###! PRE-USER INPUT
 
@@ -115,41 +121,37 @@ def dfplot(df, layer_boundaries):
     ax2.legend(loc='upper right', fontsize='x-small')
 
 
+def station_data(ccode, name, start, end): # takes country code, station name, start and end dates
+    ccode = str(ccode); name = str(name)
+
+    stations = Stations()
+    stations = stations.region(ccode)
+    nb_stations = stations.count()
+    stationss = stations.fetch(nb_stations)
+    for i in range(int(nb_stations)):
+        if  stationss["name"].iloc[i] == name : 
+            stat_id=stationss.index[i];
+        
+    if stat_id in stat_id:
+        lat = stationss.at[stat_id, 'latitude']
+        long = stationss.at[stat_id, 'longitude']
+    else: print("Station not Found")
+    
+    station = stations.nearby(lat,long)
+    station = station.fetch(1)
+    station_data = Daily(station.index[0], start, end).fetch()
+    
+    return station_data # returns the data of the found station from the given dates 
+
+
 
 ## Extracting Layer Data
-MaterialData = pd.read_csv('projectData/LayerData.csv', index_col=0)
+MaterialData = pd.read_csv('projectData/LayerData.csv')
 # MaterialData['pi'] = MaterialData['pi'].apply(lambda x: format(x, '0.3g'))
 # MaterialData.style
 # MaterialData.style.format({'pi': formatdfcols})
 
 ###! USER INPUT:
-
-## Number of layers:
-n = int(input("Please enter the number of layers: ")) 
-print()
-
-## Initialising layer property lists:
-layer_data = []
-thck = [0]*n        # Thickness [m]
-ID = [0]*n          # Layer ID
-
-##  Collecting individual layer data from user:
-for i in range(n):
-    ("-" * 50)
-    print(f"Let's get data for layer {i+1}:")
-    print("Here is the choice of materials: \n")
-    print(MaterialData); print()
-    ID[i] = int(input(f"Insert the ID number of your material for layer {i + 1}: "))
-    thck[i] = float(input(f"Layer thickness [m] for layer {i + 1}: "))
-        
-    print("-" * 50, end="\n")
-
-
-###! CALCULATION OF CONSTANT VALUES
-
-# Total thickness
-thck_tot = sum(thck)
-
 ## Assigning Properties for each layer:
 
 ''' The following variables are not assigned directly into the df
@@ -182,27 +184,101 @@ Conditions = pd.DataFrame(
     columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
     index=['Internal', 'External'])
 
-## Assigning layer information to a dataframe:
+# Country Specs:
+# country_code = input("Please enter your country code")
+# station_name = input("Please enter your station name")
 
-# Appending all layer data to a list:
-for layer in range(0,n):
-    layer_data.append([
-        MaterialData.index[ID[layer]],                     # Layer Name
-        thck[layer],                                       # Thickness [m]
-        MaterialData["k"].iloc[ID[layer]],                 # Linear heat transfer coefficient [W/m/K]
-        MaterialData["pi"].iloc[ID[layer]],                # Permeability coefficient  [kg/m/s/Pa]
-        thck[layer]/MaterialData["k"].iloc[ID[layer]],     # Thermal Resistance [m²*K/W]
-        thck[layer]/MaterialData["pi"].iloc[ID[layer]]     # (Vapour) Resistance [m²*K/W]
-        ])
 
-# Converting list to dataframe:
+###! USER INPUT:
 
-Layer_Props = pd.DataFrame(
-    layer_data,
-    columns=['LayerName', 'Thickness', 'k', 'Permeability', 'Rth', 'Rv'],
-    index=['LAYER {}'.format(i+1) for i in range(0,n)])
 
-print(Layer_Props)
+MAX_LAYERS = 2
+layer_data = []
+Layer_Property_col_names = ['Material', 'Thickness', 'k', 'Permeability']
+
+app = Dash(__name__)
+
+app.layout = html.Div([
+    html.Div([
+        html.H1('Layer Data Input'),
+        dash_table.DataTable(
+            id='editable-table',
+            columns=(
+            [{'id': 'Layer', 'name': 'Layer'}] +
+            [{'id': p, 'name': p, 'presentation':
+                {'type': 'input'}} if p != 'Material' 
+                else {'id': p, 'name': p, 'presentation': 'dropdown'} for p in Layer_Property_col_names]
+            ),
+            data=[
+                dict(Model=i, Thickness=0.01, **{prop: None for prop in Layer_Property_col_names if prop != 'Thickness'})
+                for i in range(1, 5)                
+            ],
+            editable=True,
+            dropdown={
+                'Material': {
+                    'options': [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
+                }
+            }
+        ),
+    ]),            
+    html.Div(id='editable-table-output'),
+    dcc.Store(id='columns-state', data=Layer_Property_col_names)
+])
+
+import dash
+
+@app.callback(
+    Output('table-data', 'data'),
+    Input('editable-table', 'dropdown_value'))
+def update_row(dropdown_value):
+    # Find the row with the selected material
+    row = MaterialData[MaterialData['MATERIAL'] == dropdown_value].iloc[0]
+    # Create a new row with the updated values
+    new_row = dict(Model=row['Model'], Material=row['MATERIAL'], k=row['k'], Permeability=row['pi'])
+    # Find the index of the row to update
+    data = dash.callback_context.states['editable-table.data']
+    index = next((i for i, r in enumerate(data) if r['Model'] == new_row['Model']), None)
+    # Update the row if it exists, else append it
+    if index is not None: data[index] = new_row
+    else: data.append(new_row)
+    return data
+   
+@app.callback(
+    Output('editable-table', 'data'),
+    Input('editable-table', 'data'),
+    State('columns-state', 'data'))
+def update_k_permeability(data, columns):
+    # Update the 'k' and 'Permeability' columns based on the selected material
+    for row in data:
+        material = row['Material']
+        if material:
+            row['k'] = MaterialData[MaterialData['MATERIAL'] == material]['k'].values[0]
+            row['Permeability'] = MaterialData[MaterialData['MATERIAL'] == material]['pi'].values[0]
+    return data   
+
+@app.callback(
+    Output('editable-table-output', 'figure'),
+    Input('editable-table', 'data'),
+    Input('editable-table', 'columns'))
+def display_output(data, columns):
+    df = pd.DataFrame(data, columns=[c['name'] for c in columns])
+    return {
+        'data': [{
+            'type': 'parcoords',
+            'dimensions': [{
+                'label': col['name'],
+                'values': df[col['id']]
+            } for col in columns]
+        }]
+    }
+ 
+    
+if __name__ == '__main__':
+    app.run()
+
+#%%
+###! CALCULATION OF CONSTANT VALUES
+
 
 ## Total resistances and thermal flow
 
@@ -271,6 +347,8 @@ Final_df = pd.DataFrame(
           'Material': [MaterialData.index[ID[i-1]] for i in Layer_num]
           })
 Final_df.set_index('Thickness', inplace=True)
+
+# Final_df.to_csv('3layerexample.csv', index=False)
 
 # pd.set_option("display.max_rows", None)
 # print(Final_df)
