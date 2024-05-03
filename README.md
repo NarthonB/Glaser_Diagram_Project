@@ -1,4 +1,4 @@
-The purpose of this project is to visually and quantitatively show the points of condensation in a user-defined wall.
+The purpose of this project is to visually and quantitatively show the area of condensation in a user-defined wall. These plots are not accurate representations of condensation in the wall, only indicating the risk of the phenomenon. 
 
 All data and equations were taken from the Applied Thermodynamics course taken at INSA Strasbourg (cited below).
 Some early versions might have some language inconsistencies since this course was taught in french. 
