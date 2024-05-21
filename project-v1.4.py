@@ -200,12 +200,26 @@ import plotly.io as pio
 
 default_Materials=['Glass Wool', 'Concrete', 'Brick']
 default_Thicknesses=[0.05, 0.25, 0.05]
+num_rows_input = dcc.Input(id='num-rows-input', type='number', value=3)
+
+Material_Dropdown_options = [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
+
+default_n_rows = 3
+
+
 
 app = Dash(__name__)
 
 app.layout = html.Div([
     html.Div([
         html.H1('Layer Data Input'),
+        html.Div([
+            html.Div([
+                html.Label('Number of rows:'),
+                num_rows_input
+        ]),
+        html.Button(id='submit-button', children='Submit')
+    ]),
         dash_table.DataTable(
             id='editable-table',
             columns=(
@@ -214,26 +228,35 @@ app.layout = html.Div([
                 {'type': 'input'}} if p != 'Material' 
                 else {'id': p, 'name': p, 'presentation': 'dropdown'} for p in Layer_Property_col_names]
             ),
+                # {'id': 'Layer', 'name': 'Layer Number'},
+                # {'id': 'Material', 'name': 'Material', 'dropdown': True, 'options': [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]},
+                # {'id': 'Thickness', 'name': 'Thickness'},
+                # {'id': 'k', 'name': 'k'},
+                # {'id': 'Permeability', 'name': 'Permeability'}
+            # ],
+
             data=[
-                dict(Model=i, 
+                dict(Layer=i,
+                    Model=i, 
                      Material=default_Materials[i-1], 
                      Thickness=default_Thicknesses[i-1])
-                for i in range(1, 4)                
+                for i in range(1, default_n_rows+1)                
             ],
             editable=True,
             dropdown={
+
                 'Material': {
                     'options': [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
                 }
             }
         ),
-    ]),            
+    ]),
+    # html.Div([
+    # html.Button('Add Row', id='add-row-button', n_clicks=0),
+    # html.Button('Remove Row', id='remove-row-button', n_clicks=0)
+    # ]),            
     html.Div(id='editable-table-output'),
     dcc.Store(id='columns-state', data=Layer_Property_col_names),
-    html.Div([
-        html.H2('Output Diagram'),
-        # incorporate plotly diagram - will need to update with input
-    ]),
     html.Button('Calculate', id='calculate-button', n_clicks=1),
     # dash_table.DataTable(
     #     id='Final-DataFrame',
@@ -245,7 +268,8 @@ app.layout = html.Div([
     #     ]   
     # ),
     dcc.Graph(id='Final-Graph'),
-    dcc.Store(id='final-data-store')
+    dcc.Store(id='final-data-store'),
+    dcc.Store(id='layer-boundaries-store')
 ])
 
 import dash
@@ -257,7 +281,12 @@ def update_row(dropdown_value):
     # Find the row with the selected material
     row = MaterialData[MaterialData['MATERIAL'] == dropdown_value].iloc[0]
     # Create a new row with the updated values
-    new_row = dict(Model=row['Model'], Material=row['MATERIAL'], k=row['k'], Permeability=row['pi'])
+    new_row = dict(Model=row['Model'],
+                   Material=row['MATERIAL'],
+                   k=row['k'],
+                   Permeability=row['pi'],
+                   Thickness=float(row['Thickness'])
+                   )
     # Find the index of the row to update
     data = dash.callback_context.states['editable-table.data']
     index = next((i for i, r in enumerate(data) if r['Model'] == new_row['Model']), None)
@@ -265,6 +294,7 @@ def update_row(dropdown_value):
     if index is not None: data[index] = new_row
     else: data.append(new_row)
     return data
+
    
 @app.callback(
     Output('editable-table', 'data'),
@@ -277,7 +307,7 @@ def update_k_permeability(data, columns):
         if material:
             row['k'] = MaterialData[MaterialData['MATERIAL'] == material]['k'].values[0]
             row['Permeability'] = MaterialData[MaterialData['MATERIAL'] == material]['pi'].values[0]
-    return data   
+    return data
 
 @app.callback(
     Output('editable-table-output', 'figure'),
@@ -295,9 +325,11 @@ def display_output(data, columns):
             } for col in columns]
         }]
     }
+
+ 
  
 @app.callback(
-    Output('final-data-store', 'data'),
+    [Output('final-data-store', 'data'), Output('layer-boundaries-store', 'data')],
     Input('calculate-button', 'n_clicks'),
     State('editable-table', 'data'),
     State('editable-table', 'columns')
@@ -305,12 +337,14 @@ def display_output(data, columns):
 def calcs(n_clicks, data, columns):
     # Create a pandas DataFrame from the data and columns inputs
     df = pd.DataFrame(data, columns=[c['name'] for c in columns])
+    df['Thickness'] = pd.to_numeric(df['Thickness'])
     
     thickness = df[columns[2]['id']]
     k = df[columns[3]['id']]
     pi = df[columns[4]['id']]
-
+    
     ###! CONSTANT VALUES
+    
     total_thickness = sum(thickness)
     # Layer Resistances   
     R_thermal = [t/k for t, k in zip(thickness, k)]
@@ -368,45 +402,82 @@ def calcs(n_clicks, data, columns):
             'Temperature': Temperature,
             'SatVapPressure': pvs_vals,
             'VapPressure': pv_vals,
-            # 'Material': [MaterialData.index[ID[i-1]] for i in Layer_num]
+            'Layer Num': [MaterialData.index[i-1] for i in Layer_num]
             })
-    Final_df.set_index('Thickness', inplace=True)
+    # Final_df.set_index('Thickness', inplace=True)
+    # Final_df.reset_index(inplace=True)
     
-    return Final_df.to_dict('records')
+    return Final_df.to_dict('records'), layer_boundaries_real
 
 @app.callback(
     Output('Final-Graph', 'figure'),
-    Input('final-data-store', 'data')
+    [Input('final-data-store', 'data'),
+     Input('layer-boundaries-store', 'data'),
+     Input('editable-table', 'data')]
 )
-def update_graph(data):
-    Final_df = pd.DataFrame(data)
-    print(Final_df)
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+def update_graph(data, layer_boundaries_real, table_data):
+    if data is not None:
+        Final_df = pd.DataFrame.from_records(data)
+        # Final_df['Thickness'] = Final_df['Thickness'].round(5)
+        Final_df.set_index('Thickness', inplace=True)
+        # Final_df.set_index('Thickness', inplace=True)
+        
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-    Temp = go.Scatter(x=Final_df.index, y=Final_df['Temperature'], name='Temperature')
-    Sat_Vap_Pressure = go.Scatter(x=Final_df.index,y=Final_df['SatVapPressure'], name='p_vs')
-    Vap_Pressure = go.Scatter(x=Final_df.index, y=Final_df['VapPressure'], name='p_v')
+        Temp = go.Scatter(x=Final_df.index, y=Final_df['Temperature'], line=dict(color='red', dash='dash'), name='Temperature')
+        Sat_Vap_Pressure = go.Scatter(x=Final_df.index,y=Final_df['SatVapPressure'], line=dict(color='blue'), name='p_vs')
+        Vap_Pressure = go.Scatter(x=Final_df.index, y=Final_df['VapPressure'], line=dict(color='cyan'), name='p_v')
 
-    # fig = go.Figure()
-    fig.add_trace(Temp, secondary_y=False)
-    fig.add_trace(Sat_Vap_Pressure, secondary_y=True)
-    fig.add_trace(Vap_Pressure, secondary_y=True)
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=False, secondary_y=False)
-    fig.update_yaxes(showgrid=False, secondary_y=True)
+        if Temp.y[0] is not None:
+            y_min, y_max = min(Temp.y), max(Temp.y) * 1.05
+        else: y_min, y_max = 0, 25
+        
+        fig.update_yaxes(range=[y_min, y_max], title_text="Temperature [°C]", showgrid=False, secondary_y=False)
+        fig.update_yaxes(title_text="Pressure [Pa]", showgrid=False, secondary_y=True)
+        fig.update_xaxes(title_text="distance through wall [m]")
+        
+        fig.add_trace(Temp, secondary_y=False)
+        fig.add_trace(Sat_Vap_Pressure, secondary_y=True)
+        fig.add_trace(Vap_Pressure, secondary_y=True)
+        fig.update_xaxes(showgrid=False)
+        
+        # Update the color of each layer based on the material
+        material_colours = [colourpicker(row['Material']) for row in table_data]
 
-    fig.update_yaxes(title_text="Temperature", secondary_y=False)
-    fig.update_yaxes(title_text="Pressure", secondary_y=True)
+        ## Displaying layer Boundaries
 
-    # fig.add_trace(go.Scatter(
-    #     x=Final_df.index + Final_df.index.values[::-1],
-    #     y=Final_df['SatVapPressure'] + [::-1],
-    #     fill='tozerox', # Fill to the x-axis
-    #     fillcolor='rgba(0, 100, 80, 0.2)', # Specify fill color
-    #     line=dict(color='rgba(255,255,255,0)'), # Set line color to transparent
-    #     showlegend=False, # Hide from legend
-    # ))
-    return fig
+        Final_df['Color'] = Final_df['Layer Num'].apply(lambda x: material_colours[x])
+
+        shapes = []
+        for i, boundary in enumerate(layer_boundaries_real):
+            fillcolour = material_colours[i] if i < len(material_colours) else material_colours[-1]
+            shape = {
+                'type': 'rect',
+                'x0': boundary,
+                'x1': layer_boundaries_real[i+1] if i+1 < len(layer_boundaries_real) else max(layer_boundaries_real),
+                'y0': 0,
+                'y1': y_max,
+                'fillcolor': fillcolour,
+                'opacity': 0.5,
+                'layer': 'below',
+                'line': {'width': 0}
+            }
+            shapes.append(shape)
+
+        # updates colours if material is changed
+        fig.update_layout(shapes=shapes)
+        
+        layer_boundaries_array = [(boundary, boundary) for boundary in layer_boundaries_real]
+        for boundary in layer_boundaries_array:
+            fig.add_shape(type='line', x0=boundary[0], y0=0, x1=boundary[1], y1=100, line=dict(color='black', width=2))
+        
+        # Layer separations
+        # layer_boundaries_array = np.array(layer_boundaries_real)
+        # for boundary in layer_boundaries_array:
+        #     fig.add_shape(type='line', x0=boundary, y0=0, x1=boundary, y1=100, line=dict(color='black', width=2))
+
+        return fig
+    else: return go.Figure()
     
 if __name__ == '__main__':
     app.run()

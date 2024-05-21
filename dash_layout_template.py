@@ -45,7 +45,7 @@ def generate_layer_inputs(n_clicks, children):
         last_index = len(inputs)
         inputs.append(html.Div([
             html.H2(f'Layer {last_index+1}:'),
-            html.P('Select material:'),
+            html.P('Select material:'),     # should include the relevant data on hover
             dcc.Dropdown(
                 id=f'material-{last_index}',
                 options=[{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
