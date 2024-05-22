@@ -244,15 +244,15 @@ app.layout = html.Div([
             ],
             editable=True,
             dropdown={
-
                 'Material': {
                     'options': [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
                 }
-            }
+            },
+            row_deletable=True            
         ),
     ]),
     # html.Div([
-    # html.Button('Add Row', id='add-row-button', n_clicks=0),
+    html.Button('Add Row', id='add-row-button', n_clicks=0),
     # html.Button('Remove Row', id='remove-row-button', n_clicks=0)
     # ]),            
     html.Div(id='editable-table-output'),
@@ -295,7 +295,6 @@ def update_row(dropdown_value):
     else: data.append(new_row)
     return data
 
-   
 @app.callback(
     Output('editable-table', 'data'),
     Input('editable-table', 'data'),
@@ -308,6 +307,18 @@ def update_k_permeability(data, columns):
             row['k'] = MaterialData[MaterialData['MATERIAL'] == material]['k'].values[0]
             row['Permeability'] = MaterialData[MaterialData['MATERIAL'] == material]['pi'].values[0]
     return data
+
+
+# @app.callback(
+#     Output('editable-table', 'data'),
+#     Input('add-row-button', 'n_clicks'),
+#     State('editable-table', 'data'),
+#     State('editable-table', 'columns'))
+# def add_row(n_clicks, rows, columns):
+#     if n_clicks>0:
+#         rows.append({c['id']: '' for c in columns})
+#     return rows
+
 
 @app.callback(
     Output('editable-table-output', 'figure'),
@@ -325,7 +336,9 @@ def display_output(data, columns):
             } for col in columns]
         }]
     }
+   
 
+import plotly.graph_objects as go
  
  
 @app.callback(
@@ -417,35 +430,62 @@ def calcs(n_clicks, data, columns):
 )
 def update_graph(data, layer_boundaries_real, table_data):
     if data is not None:
+        ###! Extracting Input Data
         Final_df = pd.DataFrame.from_records(data)
-        # Final_df['Thickness'] = Final_df['Thickness'].round(5)
         Final_df.set_index('Thickness', inplace=True)
-        # Final_df.set_index('Thickness', inplace=True)
         
+        ## Adding condensation values to the dataframe 
+        Final_df['VapPressure_cond'] = np.where(Final_df['VapPressure'] > Final_df['SatVapPressure'], Final_df['VapPressure'], np.nan)
+        Final_df['SatVapPressure_cond'] = np.where(Final_df['VapPressure'] > Final_df['SatVapPressure'], Final_df['SatVapPressure'], np.nan)
+            
+        
+        ###! Creating Traces
+        # Creating secondary axis:
         fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        # Temperature Trace:
+        Temperature = go.Scatter(x=Final_df.index, y=Final_df['Temperature'],
+                                 line=dict(color='red', dash='dash'), name='Temperature')
+        # Vapour Pressure trace:
+        Vap_Pressure = go.Scatter(x=Final_df.index, y=Final_df['VapPressure'],
+                                line=dict(color='cyan'),name='p_v')
+        # Create the SatVap_Pressure trace
+        SatVap_Pressure = go.Scatter(x=Final_df.index, y=Final_df['SatVapPressure'],
+                                    line=dict(color='blue'), name='p_sat')
 
-        Temp = go.Scatter(x=Final_df.index, y=Final_df['Temperature'], line=dict(color='red', dash='dash'), name='Temperature')
-        Sat_Vap_Pressure = go.Scatter(x=Final_df.index,y=Final_df['SatVapPressure'], line=dict(color='blue'), name='p_vs')
-        Vap_Pressure = go.Scatter(x=Final_df.index, y=Final_df['VapPressure'], line=dict(color='cyan'), name='p_v')
+        ## Creating Condensation Traces
+        Vap_Cond = go.Scatter(x=Final_df.index, y=Final_df['VapPressure_cond'],
+                                   line=dict(color='cyan'),
+                                   fill='tonexty', connectgaps=False)
 
-        if Temp.y[0] is not None:
-            y_min, y_max = min(Temp.y), max(Temp.y) * 1.05
+        SatVap_Cond = go.Scatter(x=Final_df.index, y=Final_df['SatVapPressure_cond'],
+                                    line=dict(color='blue'), connectgaps=False)
+
+        if Temperature.y[0] is not None:
+            y_min, y_max = min(Temperature.y), max(Temperature.y) * 1.05
         else: y_min, y_max = 0, 25
         
         fig.update_yaxes(range=[y_min, y_max], title_text="Temperature [°C]", showgrid=False, secondary_y=False)
         fig.update_yaxes(title_text="Pressure [Pa]", showgrid=False, secondary_y=True)
         fig.update_xaxes(title_text="distance through wall [m]")
         
-        fig.add_trace(Temp, secondary_y=False)
-        fig.add_trace(Sat_Vap_Pressure, secondary_y=True)
+        fig.add_trace(Temperature, secondary_y=False)
+        fig.add_trace(SatVap_Pressure, secondary_y=True)
+        
+        ## Displaying Condensation Area 
+        fig.add_trace(SatVap_Cond, secondary_y=True)
+        fig.add_trace(Vap_Cond, secondary_y=True)
+        
         fig.add_trace(Vap_Pressure, secondary_y=True)
+        # fig.add_trace(Condensation_Pressure, secondary_y=True)
+        
         fig.update_xaxes(showgrid=False)
+        fig.update_layout(showlegend=False)
         
         # Update the color of each layer based on the material
         material_colours = [colourpicker(row['Material']) for row in table_data]
 
         ## Displaying layer Boundaries
-
         Final_df['Color'] = Final_df['Layer Num'].apply(lambda x: material_colours[x])
 
         shapes = []
@@ -471,10 +511,12 @@ def update_graph(data, layer_boundaries_real, table_data):
         for boundary in layer_boundaries_array:
             fig.add_shape(type='line', x0=boundary[0], y0=0, x1=boundary[1], y1=100, line=dict(color='black', width=2))
         
-        # Layer separations
-        # layer_boundaries_array = np.array(layer_boundaries_real)
-        # for boundary in layer_boundaries_array:
-        #     fig.add_shape(type='line', x0=boundary, y0=0, x1=boundary, y1=100, line=dict(color='black', width=2))
+        # Shade Condensation Area :
+        # Cond_p_vs, Cond_p_v = []
+        # # for i, j in Final_df['VapPressure'], Final_df['SatVapPressure']:
+        # for i in range(Final_df['VapPressure']):
+        #     if Final_df["VapPressure"]>Final_df["SatVapPressure"]:
+            
 
         return fig
     else: return go.Figure()
