@@ -1,6 +1,6 @@
 #%%
 from datetime import datetime as dt
-from meteostat import Daily, Stations
+from meteostat import Hourly, Daily, Stations
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -124,7 +124,7 @@ def dfplot(df, layer_boundaries):
     ax2.legend(loc='upper right', fontsize='x-small')
 
 
-def station_data(ccode, name, start, end): # takes country code, station name, start and end dates
+def station_data(ccode, name, date): # takes country code, station name, start and end dates
     ccode = str(ccode); name = str(name)
 
     stations = Stations()
@@ -134,21 +134,35 @@ def station_data(ccode, name, start, end): # takes country code, station name, s
     for i in range(int(nb_stations)):
         if  stationss["name"].iloc[i] == name : 
             stat_id=stationss.index[i];
-        
-    if stat_id in stat_id:
+    
+    # Extracting coordinates of chosen station 
+    if stat_id:
         lat = stationss.at[stat_id, 'latitude']
         long = stationss.at[stat_id, 'longitude']
     else: print("Station not Found")
-    
     station = stations.nearby(lat,long)
     station = station.fetch(1)
-    station_data = Daily(station.index[0], start, end).fetch()
     
-    return station_data # returns the data of the found station from the given dates 
+    # Setting the start and end to be at beginning and end of the day 
+    if date is not None:
+        year, month, day = date.year, date.month, date.day      # splitting the input date
+        start = dt(year, month, day, 0)
+        end = dt(year, month, day, 23)
+    else:
+        start = dt(2020,1,1,0)
+        end=dt(2020,1,1,23)
+    
+    station_data = Hourly(station.index[0], start, end).fetch()
+    relevant_data = station_data[['wspd','temp', 'rhum']]
+    relevant_data['rhum'] = station_data['rhum']/100
+    
+    return relevant_data # returns the data of the found station from the given dates 
 
 
+default_data = station_data("FR", "Strasbourg", dt(2000,1,1))
 
-## Extracting Layer Data
+#%%
+## Extracting Material Data
 MaterialData = pd.read_csv('projectData/LayerData.csv')
 
 ###! USER INPUT:
@@ -158,37 +172,57 @@ MaterialData = pd.read_csv('projectData/LayerData.csv')
     as they will depend on user input and Meteostat data in a future version. '''
 
 # Internal conditions: (#*# will depend on user's internal requirements)
+def Boundary_Conditions_array(air_speed, temperature, humidity):
+    conditions = [
+        convection_coeff(air_speed),        # Convection coefficient [W/m²/K]
+        convection_coeff(air_speed)*6.9e-9, # Mass_Transfer []
+        temperature,                        # Temperature [°C]
+        humidity,                           # Relative Humidity [-]
+        pvs(temperature),                   # Saturated Vapour Pressure [Pa]
+        pvs(temperature)*humidity           # Vapour Pressure [Pa]
+    ]
+    return conditions
+
+
+
 air_speed_i = 0.2                       #*#
-hc_i = convection_coeff(air_speed_i)        # convection coefficient [W/m²K]
-# hm_i = 1.11e-3                            # mass transfer coefficient []
-hm_i = hc_i*6.9e-9
 internal_Temperature = 20.0             #*#
 hum_i = 0.5                             #*#
-pvs_i = pvs(internal_Temperature)
-pv_i =  pvs_i*hum_i
 
-# External conditions: (#*# to depend on méteostat)
 air_speed_e = 4.0                       #*#
-hc_e = convection_coeff(air_speed_e)    #*#
-# hm_e = 1.06E-2
-hm_e = hc_e*6.9e-9
 external_Temperature = 0.0              #*#
 hum_e = 0.9                             #*#
-pvs_e = pvs(external_Temperature)
-pv_e =  pvs_e*hum_e
 
-# Constructing DataFrame with Internal/External Conditions
 Conditions = pd.DataFrame(
-    [[hc_i, hm_i, internal_Temperature, hum_i, pvs_i, pv_i],
-     [hc_e, hm_e, external_Temperature, hum_e, pvs_e, pv_e]],
+    [Boundary_Conditions_array(air_speed_i, internal_Temperature, hum_i),
+     Boundary_Conditions_array(air_speed_e, external_Temperature, hum_e)],
     columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
     index=['Internal', 'External'])
 
-# Country Specs:
-# country_code = input("Please enter your country code")
-# station_name = input("Please enter your station name")
+
+def fetch_stations(ccode):
+    stations = Stations()
+    stations = stations.region(ccode)
+    nb_stations = stations.count()
+    station_list = stations.fetch(nb_stations)
+    
+    options = [{'label': name, 'value': name} for name in station_list["name"]]
+    
+    return options
+
+def fetch_station_info(ccode, station_name):
+    stations = Stations()
+    stations = stations.region(ccode)
+    nb_stations = stations.count()
+    station_list = stations.fetch(nb_stations)
+    for i in range(int(nb_stations)):
+        if  station_list["name"].iloc[i] == station_name : 
+            stat_id=station_list.index[i];
+    station_data = station_list.loc[stat_id]
+    return station_data
 
 
+#%%
 ###! USER INPUT:
 
 layer_data = []
@@ -206,20 +240,14 @@ Material_Dropdown_options = [{'label': material, 'value': material} for material
 
 default_n_rows = 3
 
+import dash
 
 
 app = Dash(__name__)
 
 app.layout = html.Div([
     html.Div([
-        html.H1('Layer Data Input'),
-        html.Div([
-            html.Div([
-                html.Label('Number of rows:'),
-                num_rows_input
-        ]),
-        html.Button(id='submit-button', children='Submit')
-    ]),
+        html.H2("Layer Design"),
         dash_table.DataTable(
             id='editable-table',
             columns=(
@@ -228,13 +256,6 @@ app.layout = html.Div([
                 {'type': 'input'}} if p != 'Material' 
                 else {'id': p, 'name': p, 'presentation': 'dropdown'} for p in Layer_Property_col_names]
             ),
-                # {'id': 'Layer', 'name': 'Layer Number'},
-                # {'id': 'Material', 'name': 'Material', 'dropdown': True, 'options': [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]},
-                # {'id': 'Thickness', 'name': 'Thickness'},
-                # {'id': 'k', 'name': 'k'},
-                # {'id': 'Permeability', 'name': 'Permeability'}
-            # ],
-
             data=[
                 dict(Layer=i,
                     Model=i, 
@@ -251,28 +272,41 @@ app.layout = html.Div([
             row_deletable=True            
         ),
     ]),
-    # html.Div([
-    html.Button('Add Row', id='add-row-button', n_clicks=0),
-    # html.Button('Remove Row', id='remove-row-button', n_clicks=0)
-    # ]),            
+    
+    # Inputs for internal properties
+    html.H3('Internal Properties'),
+    html.Label('Air Speed (m/s):'),
+    dcc.Input(id='internal_air_speed', value=0.2, type='number'),
+    html.Label('Temperature (°C):'),
+    dcc.Input(id='internal_temperature', value=20.0, type='number'),
+    html.Label('Humidity (-):'),
+    dcc.Input(id='internal_humidity', value=0.5, type='number'),
+
+    # Inputs for country choice
+    html.H3("Location Choice"),
+    html.Label("Country Code:"),
+    dcc.Input(id='country-code', value='FR', type='string'),
+    html.Label("Station:"),
+    dcc.Dropdown(id='station-dropdown', value='Strasbourg', options=[]),
+    html.Label("Date:"),
+    dcc.DatePickerSingle(
+        id='date-picker',
+        date=dt(2020,1,1)
+        ),         # Date choice based on the station chosen
+    
     html.Div(id='editable-table-output'),
     dcc.Store(id='columns-state', data=Layer_Property_col_names),
+    
     html.Button('Calculate', id='calculate-button', n_clicks=1),
-    # dash_table.DataTable(
-    #     id='Final-DataFrame',
-    #     columns=[
-    #         {"name": "Thickness [m]", "id": 'Thickness'},
-    #         {"name": "Temperature [℃]", "id": 'Temperature'},
-    #         {"name": "Saturated Vapour Pressure [Pa]", "id": 'SatVapPressure'},
-    #         {"name": "Vapour Pressure [Pa]", "id": 'VapPressure'}
-    #     ]   
-    # ),
+
+    html.H2("Output Graph"),
     dcc.Graph(id='Final-Graph'),
+    
     dcc.Store(id='final-data-store'),
-    dcc.Store(id='layer-boundaries-store')
+    dcc.Store(id='layer-boundaries-store'),
+    
 ])
 
-import dash
 
 @app.callback(
     Output('table-data', 'data'),
@@ -309,17 +343,6 @@ def update_k_permeability(data, columns):
     return data
 
 
-# @app.callback(
-#     Output('editable-table', 'data'),
-#     Input('add-row-button', 'n_clicks'),
-#     State('editable-table', 'data'),
-#     State('editable-table', 'columns'))
-# def add_row(n_clicks, rows, columns):
-#     if n_clicks>0:
-#         rows.append({c['id']: '' for c in columns})
-#     return rows
-
-
 @app.callback(
     Output('editable-table-output', 'figure'),
     Input('editable-table', 'data'),
@@ -342,12 +365,41 @@ import plotly.graph_objects as go
  
  
 @app.callback(
+    Output('station-dropdown', 'options'),
+    [Input('country-code', 'value')]
+)
+def update_dropdown(country_code):
+    '''Extracts the available stations in a country'''
+    options = fetch_stations(country_code)
+    return options
+
+@app.callback(
+    [Output('date-picker', 'min_date_allowed'),
+     Output('date-picker', 'max_date_allowed')],
+    [Input('station-dropdown', 'value'),
+     Input('country-code', 'value')]
+)
+def update_date_picker(station_name, ccode):
+    '''Sets the range of dates between which data is available for chosen station'''
+    station_data=fetch_station_info(ccode, station_name)
+    min_date=station_data["hourly_start"].date()
+    max_date=station_data["hourly_end"].date()
+    return min_date, max_date
+ 
+@app.callback(
     [Output('final-data-store', 'data'), Output('layer-boundaries-store', 'data')],
     Input('calculate-button', 'n_clicks'),
     State('editable-table', 'data'),
-    State('editable-table', 'columns')
+    State('editable-table', 'columns'),
+    State('internal_air_speed', 'value'),
+    State('internal_temperature', 'value'),
+    State('internal_humidity', 'value'),
+    State('country-code', 'value'),
+    State('station-dropdown', 'value'),
+    State('date-picker', 'value')
 )
-def calcs(n_clicks, data, columns):
+def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, internal_humidity, ccode, station, date):
+    '''Callback which performs all calculations required to produce the diagram'''
     # Create a pandas DataFrame from the data and columns inputs
     df = pd.DataFrame(data, columns=[c['name'] for c in columns])
     df['Thickness'] = pd.to_numeric(df['Thickness'])
@@ -356,6 +408,18 @@ def calcs(n_clicks, data, columns):
     k = df[columns[3]['id']]
     pi = df[columns[4]['id']]
     
+    relevant_weather_data = station_data(ccode,station,date)
+    external_air_speed = max(relevant_weather_data['wspd'])
+    external_temperature = max(relevant_weather_data['temp'])
+    external_humidity = max(relevant_weather_data['rhum'])
+    
+    # importing the conditions dataframe
+    Conditions = pd.DataFrame(
+        [Boundary_Conditions_array(internal_air_speed, internal_temperature, internal_humidity),
+         Boundary_Conditions_array(external_air_speed, external_temperature, external_humidity)],
+        columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
+        index=['Internal', 'External']
+    )
     ###! CONSTANT VALUES
     
     total_thickness = sum(thickness)
@@ -511,13 +575,6 @@ def update_graph(data, layer_boundaries_real, table_data):
         for boundary in layer_boundaries_array:
             fig.add_shape(type='line', x0=boundary[0], y0=0, x1=boundary[1], y1=100, line=dict(color='black', width=2))
         
-        # Shade Condensation Area :
-        # Cond_p_vs, Cond_p_v = []
-        # # for i, j in Final_df['VapPressure'], Final_df['SatVapPressure']:
-        # for i in range(Final_df['VapPressure']):
-        #     if Final_df["VapPressure"]>Final_df["SatVapPressure"]:
-            
-
         return fig
     else: return go.Figure()
     
