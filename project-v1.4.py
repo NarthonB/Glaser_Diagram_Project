@@ -154,7 +154,7 @@ def station_data(ccode, name, date): # takes country code, station name, start a
     
     station_data = Hourly(station.index[0], start, end).fetch()
     relevant_data = station_data[['wspd','temp', 'rhum']]
-    relevant_data['rhum'] = station_data['rhum']/100
+    relevant_data.loc[:,'rhum'] = station_data['rhum']/100
     
     return relevant_data # returns the data of the found station from the given dates 
 
@@ -239,6 +239,7 @@ num_rows_input = dcc.Input(id='num-rows-input', type='number', value=3)
 Material_Dropdown_options = [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
 
 default_n_rows = 3
+default_date = dt(2020,1,1)
 
 import dash
 
@@ -246,6 +247,10 @@ import dash
 app = Dash(__name__)
 
 app.layout = html.Div([
+    html.H1(
+        children="GLASER DIAGRAM",
+        style={'textAlign': 'center'}
+    ),
     html.Div([
         html.H2("Layer Design"),
         dash_table.DataTable(
@@ -291,7 +296,7 @@ app.layout = html.Div([
     html.Label("Date:"),
     dcc.DatePickerSingle(
         id='date-picker',
-        date=dt(2020,1,1)
+        date=default_date
         ),         # Date choice based on the station chosen
     
     html.Div(id='editable-table-output'),
@@ -385,6 +390,14 @@ def update_date_picker(station_name, ccode):
     min_date=station_data["hourly_start"].date()
     max_date=station_data["hourly_end"].date()
     return min_date, max_date
+
+@app.callback(
+    Output('date-picker', 'value'),
+    Input('date-picker', 'date')
+)
+def update_date(date):
+    '''converts date to value'''
+    return date
  
 @app.callback(
     [Output('final-data-store', 'data'), Output('layer-boundaries-store', 'data')],
@@ -408,10 +421,15 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
     k = df[columns[3]['id']]
     pi = df[columns[4]['id']]
     
+    # Converts chosen date to datetime format
+    if date is not None: date = dt.fromisoformat(date)
+    else: date = default_date
+    
     relevant_weather_data = station_data(ccode,station,date)
     external_air_speed = max(relevant_weather_data['wspd'])
     external_temperature = max(relevant_weather_data['temp'])
     external_humidity = max(relevant_weather_data['rhum'])
+    
     
     # importing the conditions dataframe
     Conditions = pd.DataFrame(
@@ -420,6 +438,7 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
         columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
         index=['Internal', 'External']
     )
+    print(Conditions['Temperature'])
     ###! CONSTANT VALUES
     
     total_thickness = sum(thickness)
