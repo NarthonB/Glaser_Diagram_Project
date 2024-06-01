@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+### DASH modules
+import dash
 from dash import Dash, html, dcc, Input, Output, callback, ALL, Patch, State, dash_table
 import plotly.express as px
 import plotly.graph_objects as go, plotly.subplots as sp
@@ -71,6 +73,11 @@ def rounduptoint(number):
     '''Rounds up float values to nearest integer'''
     return int(-((-number)//1))
 
+def calculate_ticks(total_thickness):
+    Magnitude = np.floor(np.log10(total_thickness))    # determine the order of magnitude
+    ticks = (10**Magnitude)/100                       # assures the graph will always have the correct amount of ticks
+    return ticks
+
 def dfplot(df, layer_boundaries):
     '''Takes in a dataframe with the following columns:
     {x values (indexed), Temperature, SatVapPressure, VapPressure, Material Names}
@@ -123,8 +130,22 @@ def dfplot(df, layer_boundaries):
     ax1.legend(loc='upper center', fontsize='x-small')
     ax2.legend(loc='upper right', fontsize='x-small')
 
+def Boundary_Conditions_array(air_speed, temperature, humidity):
+    '''Calculates all the relevant Boundary conditions and returns them in an array'''
+    conditions = [
+        convection_coeff(air_speed),        # Convection coefficient [W/m²/K]
+        convection_coeff(air_speed)*6.9e-9, # Mass_Transfer []
+        temperature,                        # Temperature [°C]
+        humidity,                           # Relative Humidity [-]
+        pvs(temperature),                   # Saturated Vapour Pressure [Pa]
+        pvs(temperature)*humidity           # Vapour Pressure [Pa]
+    ]
+    return conditions
 
 def station_data(ccode, name, date): # takes country code, station name, start and end dates
+    '''Returns data relevant to the program (wind speed, temperature and relative humidity)
+    for a selected place and date'''
+    
     ccode = str(ccode); name = str(name)
 
     stations = Stations()
@@ -158,49 +179,8 @@ def station_data(ccode, name, date): # takes country code, station name, start a
     
     return relevant_data # returns the data of the found station from the given dates 
 
-
-default_data = station_data("FR", "Strasbourg", dt(2000,1,1))
-
-#%%
-## Extracting Material Data
-MaterialData = pd.read_csv('projectData/LayerData.csv')
-
-###! USER INPUT:
-## Assigning Properties for each layer:
-
-''' The following variables are not assigned directly into the df
-    as they will depend on user input and Meteostat data in a future version. '''
-
-# Internal conditions: (#*# will depend on user's internal requirements)
-def Boundary_Conditions_array(air_speed, temperature, humidity):
-    conditions = [
-        convection_coeff(air_speed),        # Convection coefficient [W/m²/K]
-        convection_coeff(air_speed)*6.9e-9, # Mass_Transfer []
-        temperature,                        # Temperature [°C]
-        humidity,                           # Relative Humidity [-]
-        pvs(temperature),                   # Saturated Vapour Pressure [Pa]
-        pvs(temperature)*humidity           # Vapour Pressure [Pa]
-    ]
-    return conditions
-
-
-
-air_speed_i = 0.2                       #*#
-internal_Temperature = 20.0             #*#
-hum_i = 0.5                             #*#
-
-air_speed_e = 4.0                       #*#
-external_Temperature = 0.0              #*#
-hum_e = 0.9                             #*#
-
-Conditions = pd.DataFrame(
-    [Boundary_Conditions_array(air_speed_i, internal_Temperature, hum_i),
-     Boundary_Conditions_array(air_speed_e, external_Temperature, hum_e)],
-    columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
-    index=['Internal', 'External'])
-
-
 def fetch_stations(ccode):
+    '''Compiles a list of station options for a selected country'''
     stations = Stations()
     stations = stations.region(ccode)
     nb_stations = stations.count()
@@ -210,7 +190,8 @@ def fetch_stations(ccode):
     
     return options
 
-def fetch_station_info(ccode, station_name):
+def fetch_station_info(ccode, station_name):    # Used to find the date ranges for which data is available
+    '''Extracts relevant station information'''
     stations = Stations()
     stations = stations.region(ccode)
     nb_stations = stations.count()
@@ -222,94 +203,142 @@ def fetch_station_info(ccode, station_name):
     return station_data
 
 
-#%%
-###! USER INPUT:
+###! PRE-DASH
 
-layer_data = []
+## Extracting Material Data
+MaterialData = pd.read_csv('projectData/LayerData.csv')
+
 Layer_Property_col_names = ['Material', 'Thickness', 'k', 'Permeability']
-
-import plotly.graph_objects as go, plotly.subplots as sp
-from plotly.subplots import make_subplots
-import plotly.io as pio
-
-default_Materials=['Glass Wool', 'Concrete', 'Brick']
-default_Thicknesses=[0.05, 0.25, 0.05]
-num_rows_input = dcc.Input(id='num-rows-input', type='number', value=3)
-
 Material_Dropdown_options = [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
 
-default_n_rows = 3
+## DEFAULT VALUES
+
+## Assigning Properties internal/external boundaries:
+
+# Internal Conditions: 
+air_speed_i = 0.2
+internal_Temperature = 20.0
+hum_i = 0.5
+
+# External Conditions:
+air_speed_e = 4.0
+external_Temperature = 0.0
+hum_e = 0.9
+
+# Compiling these default values into a DataFrame
+Conditions = pd.DataFrame(
+    [Boundary_Conditions_array(air_speed_i, internal_Temperature, hum_i),
+     Boundary_Conditions_array(air_speed_e, external_Temperature, hum_e)],
+    columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
+    index=['Internal', 'External'])
+
+# Default station data:
+
+default_n_rows=3
+default_Materials=['Glass Wool', 'Concrete', 'Brick']
+default_Thicknesses=[0.05, 0.25, 0.05]
+
 default_date = dt(2020,1,1)
 
-import dash
+Intro_Text = """
+This program estimates the risk of condensation in a wall designed by the user.
+This is based on a very simplified model and is better used as a way to visually understand
+how air pressure can lead to condensation in a wall.
+After having chosen each layers' material and thickness, the internal conditions can be chosen
+and the external conditions are defined by the location and a specific date.
+
+"""
+
 
 
 app = Dash(__name__)
 
 app.layout = html.Div([
+    
     html.H1(
         children="GLASER DIAGRAM",
-        style={'textAlign': 'center'}
+        style={'textAlign': 'center', 'display': 'block'}
     ),
+    html.H2("User Input", style={'text-align': 'center', 'display': 'block'}),
     html.Div([
-        html.H2("Layer Design"),
-        dash_table.DataTable(
-            id='editable-table',
-            columns=(
-            [{'id': 'Layer', 'name': 'Layer'}] +
-            [{'id': p, 'name': p, 'presentation':
-                {'type': 'input'}} if p != 'Material' 
-                else {'id': p, 'name': p, 'presentation': 'dropdown'} for p in Layer_Property_col_names]
-            ),
-            data=[
-                dict(Layer=i,
-                    Model=i, 
-                     Material=default_Materials[i-1], 
-                     Thickness=default_Thicknesses[i-1])
-                for i in range(1, default_n_rows+1)                
-            ],
-            editable=True,
-            dropdown={
-                'Material': {
-                    'options': [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
-                }
-            },
-            row_deletable=True            
-        ),
-    ]),
-    
-    # Inputs for internal properties
-    html.H3('Internal Properties'),
-    html.Label('Air Speed (m/s):'),
-    dcc.Input(id='internal_air_speed', value=0.2, type='number'),
-    html.Label('Temperature (°C):'),
-    dcc.Input(id='internal_temperature', value=20.0, type='number'),
-    html.Label('Humidity (-):'),
-    dcc.Input(id='internal_humidity', value=0.5, type='number'),
+        html.Div([
+            html.Div([
+                html.H3("Layer Design", style={'text-align': 'center', 'display': 'block'}),
+                dash_table.DataTable(
+                    id='editable-table',
+                    columns=(
+                    [{'id': 'Layer', 'name': 'Layer'}] +
+                    [{'id': p, 'name': p, 'presentation':
+                        {'type': 'input'}} if p != 'Material' 
+                        else {'id': p, 'name': p, 'presentation': 'dropdown'} for p in Layer_Property_col_names]
+                    ),
+                    data=[
+                        dict(Layer=i,
+                            Model=i, 
+                            Material=default_Materials[i-1], 
+                            Thickness=default_Thicknesses[i-1])
+                        for i in range(1, default_n_rows+1)                
+                    ],
+                    editable=True,
+                    dropdown={
+                        'Material': {'options': [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]}
+                    }, 
+                    style_header={'textAlign': 'center'})
+                ]),
+            
+            ## Internal Conditions Input
+            html.Div([
+                html.H3('Internal Conditions', style={'text-align': 'center', 'display': 'block'}), 
+                html.Label('Air Speed [m/s] :  ', style={'text-align': 'center', 'display': 'block'}),
+                dcc.Input(id='internal_air_speed', value=0.2, type='number', style={'display': 'block', 'margin-top': '5px'}),
+                html.Label('Temperature [°C]:', style={'text-align': 'center', 'display': 'block'}),
+                dcc.Input(id='internal_temperature', value=20.0, type='number', style={'display': 'block', 'margin-top': '5px'}),
+                html.Label('Humidity [-] :       ', style={'text-align': 'center', 'display': 'block'}),
+                dcc.Input(id='internal_humidity', value=0.5, type='number', style={'display': 'block', 'margin-top': '5px'}),
+            ],style={'margin': '10px'}),
 
-    # Inputs for country choice
-    html.H3("Location Choice"),
-    html.Label("Country Code:"),
-    dcc.Input(id='country-code', value='FR', type='string'),
-    html.Label("Station:"),
-    dcc.Dropdown(id='station-dropdown', value='Strasbourg', options=[]),
-    html.Label("Date:"),
-    dcc.DatePickerSingle(
-        id='date-picker',
-        date=default_date
-        ),         # Date choice based on the station chosen
+            ## Location Input
+            html.Div([
+                html.H3("Location", style={'text-align': 'center', 'display': 'block'}),
+                html.Label("Country Code:"),
+                dcc.Input(id='country-code', value='FR', type='string', style={'display': 'block', 'margin-top': '5px'}),
+                # html.Label("Station:"),
+                dcc.Dropdown(id='station-dropdown', value='Strasbourg', options=[], style={'display': 'block', 'margin-top': '5px'}),
+            ], style={'margin': '10px'}),
+
+            ## Date Input
+            html.Div([
+                html.H3("Date", style={'text-align': 'center', 'display': 'block'}),
+                html.Label(""),
+                html.Label(""),
+                dcc.DatePickerSingle(
+                    id='date-picker',
+                    date=default_date,   # Date choice based on the station chosen
+                    style={'margin': '10px', 'display': 'block'},),
+                ]),
+            
+            ],style={'display': 'flex', 'flex-direction': 'row', 'align-items': 'center'}), 
+        ], style={'display': 'flex', 'flex-direction': 'column', 'align-items': 'center'}),
     
     html.Div(id='editable-table-output'),
     dcc.Store(id='columns-state', data=Layer_Property_col_names),
     
-    html.Button('Calculate', id='calculate-button', n_clicks=1),
 
-    html.H2("Output Graph"),
-    dcc.Graph(id='Final-Graph'),
+    html.H2("Output Graph", style={'display': 'block', 'text-align': 'center'}),  # center the H2 text
+    html.Div([
+        html.Button('CALCULATE', id='calculate-button', n_clicks=1, 
+                    style={'height': '150%', 'border': '2px solid black','font-size': '18px',
+                        'display': 'flex', 'align-items': 'center', 'justify-content': 'center'}),
+    ], style={'display': 'flex', 'flex-direction': 'column', 'align-items': 'center'}),
+    html.Div([
+        dcc.Graph(
+            id='Final-Graph',
+            # style={'width': '80vh'}
+        ),
+    ], style={'width': '100%', 'display': 'flex', 'justify-content': 'center', 'align-items': 'center'}),
     
     dcc.Store(id='final-data-store'),
     dcc.Store(id='layer-boundaries-store'),
-    
 ])
 
 
@@ -396,7 +425,7 @@ def update_date_picker(station_name, ccode):
     Input('date-picker', 'date')
 )
 def update_date(date):
-    '''converts date to value'''
+    '''Converts date from 'date' to 'value' format'''
     return date
  
 @app.callback(
@@ -425,20 +454,24 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
     if date is not None: date = dt.fromisoformat(date)
     else: date = default_date
     
+    # Importing relevant Meteostat input 
     relevant_weather_data = station_data(ccode,station,date)
-    external_air_speed = max(relevant_weather_data['wspd'])
-    external_temperature = max(relevant_weather_data['temp'])
-    external_humidity = max(relevant_weather_data['rhum'])
+    if relevant_weather_data['wspd'] is not None: external_air_speed = max(relevant_weather_data['wspd']); 
+    else: external_air_speed=4.0, print("default used")
+    if relevant_weather_data['temp'] is not None: external_temperature = max(relevant_weather_data['temp']);
+    else: external_temperature=0.0, print("default used")
+    if relevant_weather_data['rhum'] is not None: external_humidity = max(relevant_weather_data['rhum'])
+    else: external_humidity=0.9, print("default used")
     
     
-    # importing the conditions dataframe
+    # Creating the conditions dataframe :
     Conditions = pd.DataFrame(
         [Boundary_Conditions_array(internal_air_speed, internal_temperature, internal_humidity),
          Boundary_Conditions_array(external_air_speed, external_temperature, external_humidity)],
         columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
         index=['Internal', 'External']
     )
-    print(Conditions['Temperature'])
+    
     ###! CONSTANT VALUES
     
     total_thickness = sum(thickness)
@@ -451,24 +484,25 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
     thermal_flow = Total_flow(R_thermal_total, Conditions.Temperature['Internal'], Conditions.Temperature['External']) 
     
     # Setting number of ticks and iterations
-    Magnitude = np.floor(np.log10(total_thickness))    # determine the order of magnitude
-    ticks = (10**Magnitude)/100;                       # assures the graph will always have the correct amount of ticks
-    # ticks = 0.001;                                   # manual choice of ticks
+    ticks = calculate_ticks(total_thickness)
+    if ticks is None: ticks = 0.001
 
     layer_boundaries_real = [round(sum(thickness[:i]), 5) for i in range(4)]                 # array indicating each layer boundary
     layer_boundaries_iters = [rounduptoint(sum(thickness[:i])/ticks) for i in range(4)]      # layer boundaries in terms of number of iterations
     
-    ###! TEMPERATURE EVOLUTION
+    ###! VARIABLE EVOLUTIONS
     
-    iterations = rounduptoint(total_thickness/ticks)
+    ### TEMPERATURE EVOLUTION
+    iterations = rounduptoint(total_thickness/ticks)    # Number of data points used in the plot
+    # Setting initial Temperature value
     Temperature = [Conditions.Temperature['Internal']-(thermal_flow/Conditions.Convection['Internal'])]
     # All Temperature Evolution WITHIN THE WALL
     for i in range(1, iterations):
         Temperature.append(variable_evolution(Temperature[i-1], thermal_flow, k[determine_layer_num(i, layer_boundaries_iters)-1], ticks))
     # Final Temperature Value (at outer surface)
     Temperature.append(Conditions.Temperature['External']+(thermal_flow/Conditions.Convection['External']))
-    ###! PRESSURE EVOLUTIONS
 
+    ### PRESSURE EVOLUTIONS
     # Initialising pressure arrays
     pvs_vals = [Conditions.SatVapPressure['Internal']]
     pv_vals = [Conditions.VapPressure['Internal']]
@@ -480,7 +514,6 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
     vapour_flow = Total_flow(R_vapour_total, pv_vals[0], Conditions.VapPressure['External'])
 
     ## Calculating and storing Pressure evolution in arrays
-    # Filling arrays with a loop
     for i in range(1, iterations):
         pvs_vals.append(pvs(Temperature[i]))
         pv_vals.append(variable_evolution(pv_vals[i-1], vapour_flow, pi[determine_layer_num(i, layer_boundaries_iters)-1], ticks))
@@ -500,8 +533,6 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
             'VapPressure': pv_vals,
             'Layer Num': [MaterialData.index[i-1] for i in Layer_num]
             })
-    # Final_df.set_index('Thickness', inplace=True)
-    # Final_df.reset_index(inplace=True)
     
     return Final_df.to_dict('records'), layer_boundaries_real
 
@@ -513,6 +544,7 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
 )
 def update_graph(data, layer_boundaries_real, table_data):
     if data is not None:
+        
         ###! Extracting Input Data
         Final_df = pd.DataFrame.from_records(data)
         Final_df.set_index('Thickness', inplace=True)
@@ -544,14 +576,6 @@ def update_graph(data, layer_boundaries_real, table_data):
         SatVap_Cond = go.Scatter(x=Final_df.index, y=Final_df['SatVapPressure_cond'],
                                     line=dict(color='blue'), connectgaps=False)
 
-        if Temperature.y[0] is not None:
-            y_min, y_max = min(Temperature.y), max(Temperature.y) * 1.05
-        else: y_min, y_max = 0, 25
-        
-        fig.update_yaxes(range=[y_min, y_max], title_text="Temperature [°C]", showgrid=False, secondary_y=False)
-        fig.update_yaxes(title_text="Pressure [Pa]", showgrid=False, secondary_y=True)
-        fig.update_xaxes(title_text="distance through wall [m]")
-        
         fig.add_trace(Temperature, secondary_y=False)
         fig.add_trace(SatVap_Pressure, secondary_y=True)
         
@@ -559,18 +583,34 @@ def update_graph(data, layer_boundaries_real, table_data):
         fig.add_trace(SatVap_Cond, secondary_y=True)
         fig.add_trace(Vap_Cond, secondary_y=True)
         
-        fig.add_trace(Vap_Pressure, secondary_y=True)
-        # fig.add_trace(Condensation_Pressure, secondary_y=True)
+        fig.add_trace(Vap_Pressure, secondary_y=True)       # added separately for the 'tonexty' function to work correctly
+
+
+        ###! Additional Formatting        
+        # Setting y-axis boundaries
+        if Temperature.y[0] is not None:
+            y_min, y_max = min(Temperature.y), max(Temperature.y) * 1.05
+        else: y_min, y_max = 0, 25
         
+        # Formatting axis titles
+        fig.update_yaxes(range=[y_min, y_max], title_text="Temperature [°C]", showgrid=False, secondary_y=False)
+        fig.update_yaxes(title_text="Pressure [Pa]", showgrid=False, secondary_y=True)
+        fig.update_xaxes(title_text="distance through wall [m]")
+        
+        # Removing unnecessary graph components
+        fig.update_yaxes(zeroline=False, secondary_y=False)
+        fig.update_yaxes(zeroline=False, secondary_y=True)
         fig.update_xaxes(showgrid=False)
         fig.update_layout(showlegend=False)
         
+        
+        ###! Wall Aesthetics
+        
         # Update the color of each layer based on the material
         material_colours = [colourpicker(row['Material']) for row in table_data]
-
-        ## Displaying layer Boundaries
         Final_df['Color'] = Final_df['Layer Num'].apply(lambda x: material_colours[x])
 
+        ## Creating shapes for each layer's material
         shapes = []
         for i, boundary in enumerate(layer_boundaries_real):
             fillcolour = material_colours[i] if i < len(material_colours) else material_colours[-1]
@@ -578,7 +618,7 @@ def update_graph(data, layer_boundaries_real, table_data):
                 'type': 'rect',
                 'x0': boundary,
                 'x1': layer_boundaries_real[i+1] if i+1 < len(layer_boundaries_real) else max(layer_boundaries_real),
-                'y0': 0,
+                'y0': y_min,
                 'y1': y_max,
                 'fillcolor': fillcolour,
                 'opacity': 0.5,
@@ -590,9 +630,10 @@ def update_graph(data, layer_boundaries_real, table_data):
         # updates colours if material is changed
         fig.update_layout(shapes=shapes)
         
+        ## Displaying layer Boundaries
         layer_boundaries_array = [(boundary, boundary) for boundary in layer_boundaries_real]
         for boundary in layer_boundaries_array:
-            fig.add_shape(type='line', x0=boundary[0], y0=0, x1=boundary[1], y1=100, line=dict(color='black', width=2))
+            fig.add_shape(type='line', x0=boundary[0], y0=y_min, x1=boundary[1], y1=y_max, line=dict(color='black', width=2))
         
         return fig
     else: return go.Figure()
