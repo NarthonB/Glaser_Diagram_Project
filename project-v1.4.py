@@ -40,24 +40,16 @@ def determine_layer_num(x, layer_bounds):
     
 def Total_resistance(int_transfer, wall_resistance, ext_transfer, VB_permeance):
     '''Calculates the total thermal/vapour resistance of the wall including internal and external resistances'''
-    if (VB_permeance>0): return 1/int_transfer + sum(wall_resistance) + 1/ext_transfer + 1/VB_permeance
+    if VB_permeance is not None: return 1/int_transfer + sum(wall_resistance) + 1/ext_transfer + 1/VB_permeance
     else: return 1/int_transfer + sum(wall_resistance) + 1/ext_transfer
 
-def Total_flow(R_tot, int_cond, ext_cond):
+def Total_flow(R_tot, internal_condition, external_condition):
     '''Calculates the total thermal or vapour flow through the wall'''
-    return (1/R_tot)*(int_cond - ext_cond)
-
-# def on_plot_hover(event):
-#     # Iterating over each data member plotted
-#     for curve in plot.get_lines():
-#         # Searching which data member corresponds to current mouse position
-#         if curve.contains(event)[0]:
-#             print("over %s" % curve.get_gid())
+    return (1/R_tot)*(internal_condition - external_condition)
 
 def avg(a,b):
     '''Simple averaging function'''
     return (a+b)/2
-
 
 def colourpicker(Material_Name):
     '''Assigns colour values to Materials'''
@@ -145,9 +137,8 @@ def Boundary_Conditions_array(air_speed, temperature, humidity):
 def station_data(ccode, name, date): # takes country code, station name, start and end dates
     '''Returns data relevant to the program (wind speed, temperature and relative humidity)
     for a selected place and date'''
-    
-    ccode = str(ccode); name = str(name)
 
+    ccode = str(ccode); name = str(name)
     stations = Stations()
     stations = stations.region(ccode)
     nb_stations = stations.count()
@@ -202,11 +193,95 @@ def fetch_station_info(ccode, station_name):    # Used to find the date ranges f
     station_data = station_list.loc[stat_id]
     return station_data
 
+def calculations(conductivity, permeability, internal_air_speed, internal_temperature, internal_humidity, external_air_speed, external_temperature, external_humidity, thickness, permeance):
+    '''Performs all calculations and condenses Temperature, Saturation and Vapour Pressure evolutions 
+    into a single output dataframe.'''
+    ## Creating Conditions dataframe
+    Conditions = pd.DataFrame(
+        [Boundary_Conditions_array(internal_air_speed, internal_temperature, internal_humidity),
+         Boundary_Conditions_array(external_air_speed, external_temperature, external_humidity)],
+        columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
+        index=['Internal', 'External']
+    )
+    
+    ###! CONSTANT VALUES
+    total_thickness = sum(thickness)
+    # Layer Resistances   
+    R_thermal = [t/k for t, k in zip(thickness, conductivity)]
+    R_vapour = [t/pi for t, pi in zip(thickness, permeability)]
+    # Total Thermal Resistance
+    R_thermal_total = Total_resistance(Conditions.Convection['Internal'], R_thermal, Conditions.Convection['External'], None)
+    # Total Thermal Flow
+    thermal_flow = Total_flow(R_thermal_total, Conditions.Temperature['Internal'], Conditions.Temperature['External']) 
+    
+    # Setting number of ticks and iterations
+    ticks = calculate_ticks(total_thickness)
+    if ticks is None: ticks = 0.001
+
+    layer_boundaries_real = [round(sum(thickness[:i]), 5) for i in range(4)]                 # array indicating each layer boundary
+    layer_boundaries_iters = [rounduptoint(sum(thickness[:i])/ticks) for i in range(4)]      # layer boundaries in terms of number of iterations
+    
+    ###! VARIABLE EVOLUTIONS
+    
+    ### TEMPERATURE EVOLUTION
+    iterations = rounduptoint(total_thickness/ticks)    # Number of data points used in the plot
+    # Setting initial Temperature value
+    Temperature = [Conditions.Temperature['Internal']-(thermal_flow/Conditions.Convection['Internal'])]
+    # All Temperature Evolution WITHIN THE WALL
+    for i in range(1, iterations):
+        Temperature.append(variable_evolution(Temperature[i-1], thermal_flow, conductivity[determine_layer_num(i, layer_boundaries_iters)-1], ticks))
+    # Final Temperature Value (at outer surface)
+    Temperature.append(Conditions.Temperature['External']+(thermal_flow/Conditions.Convection['External']))
+
+    ### PRESSURE EVOLUTIONS
+
+
+    ## Calculating vapour flow through the wall:
+    pvs_vals = [Conditions.SatVapPressure['Internal']]
+    if permeance is None:
+        # Total Vapour Resistance
+        R_vapour_total = Total_resistance(Conditions.MassTransfer['Internal'], R_vapour, Conditions.MassTransfer['External'], None)
+        # Initialising pressure arrays
+        pv_vals = [Conditions.VapPressure['Internal']]
+        # Total Vapour Flow 
+        vapour_flow = Total_flow(R_vapour_total, pv_vals[0], Conditions.VapPressure['External'])
+    else:
+        ##! Vapour Barrier changes
+        R_vapour_total = Total_resistance(Conditions.MassTransfer['Internal'], R_vapour, Conditions.MassTransfer['External'], permeance)
+        vapour_flow = Total_flow(R_vapour_total, Conditions.VapPressure['Internal'], Conditions.VapPressure['External'])
+        pv_vals = [variable_evolution(Conditions.VapPressure['Internal'], vapour_flow, permeance, 1)]
+    
+    
+    ## Calculating and storing Pressure evolution in arrays
+    for i in range(1, iterations):
+        pvs_vals.append(pvs(Temperature[i]))
+        pv_vals.append(variable_evolution(pv_vals[i-1], vapour_flow, permeability[determine_layer_num(i, layer_boundaries_iters)-1], ticks))
+    # Final Pressure Values
+    pvs_vals.append(Conditions.SatVapPressure['External'])
+    pv_vals.append(Conditions.VapPressure['External'])
+    
+    ###! DATAFRAME CONVERSION
+    x_vals = np.arange(0, round(total_thickness+ticks, 5), ticks); 
+    x_vals = np.round(x_vals, 5)
+    Layer_num = [determine_layer_num(x, layer_boundaries_real) for x in x_vals]
+
+    Final_df = pd.DataFrame(
+        data={'Thickness':x_vals,
+            'Temperature': Temperature,
+            'SatVapPressure': pvs_vals,
+            'VapPressure': pv_vals,
+            'Layer Num': [MaterialData.index[i-1] for i in Layer_num]
+            })
+    return Final_df
+
 
 ###! PRE-DASH
 
 ## Extracting Material Data
 MaterialData = pd.read_csv('projectData/LayerData.csv')
+
+VapourBarrierData = pd.read_csv('projectData/VapourBarrierData.csv')
+VapourBarrier_Dropdown_options = [{'label': material, 'value': material} for material in VapourBarrierData['FILM TYPE'].unique()]
 
 Layer_Property_col_names = ['Material', 'Thickness', 'k', 'Permeability']
 Material_Dropdown_options = [{'label': material, 'value': material} for material in MaterialData['MATERIAL'].unique()]
@@ -244,12 +319,16 @@ Intro_Text = """
 This program estimates the risk of condensation in a wall designed by the user.
 This is based on a very simplified model and is better used as a way to visually understand
 how air pressure can lead to condensation in a wall.
-After having chosen each layers' material and thickness, the internal conditions can be chosen
-and the external conditions are defined by the location and a specific date.
-
+After having chosen each layers' material and thickness, the internal conditions are set by the user,
+while the external conditions are defined by the choice of location and a specified date.
+Note: not all stations have the required station data, so when data is missing, default values are used.
 """
 
+Vapour_Barrier_Info = """
+A vapour barrier is a very thin layer of vapour resistance to vapour placed on the inside layer of the wall 
+to reduce the vapour pressure at this extremity, reducing the likelylyhood of condensation """
 
+###! DASH
 
 app = Dash(__name__)
 
@@ -309,8 +388,6 @@ app.layout = html.Div([
             ## Date Input
             html.Div([
                 html.H3("Date", style={'text-align': 'center', 'display': 'block'}),
-                html.Label(""),
-                html.Label(""),
                 dcc.DatePickerSingle(
                     id='date-picker',
                     date=default_date,   # Date choice based on the station chosen
@@ -330,12 +407,21 @@ app.layout = html.Div([
                     style={'height': '150%', 'border': '2px solid black','font-size': '18px',
                         'display': 'flex', 'align-items': 'center', 'justify-content': 'center'}),
     ], style={'display': 'flex', 'flex-direction': 'column', 'align-items': 'center'}),
+
     html.Div([
         dcc.Graph(
             id='Final-Graph',
-            # style={'width': '80vh'}
-        ),
-    ], style={'width': '100%', 'display': 'flex', 'justify-content': 'center', 'align-items': 'center'}),
+            ), 
+    ], style={'display': 'flex', 'justify-content': 'center', 'align-items': 'center'}),
+
+    html.Label("If condensation occurs, choose a Vapour Barrier: ", title=Vapour_Barrier_Info,
+                style={'display': 'flex', 'justify-content': 'center', 'align-items': 'center'}),
+    html.Div([
+        dcc.Dropdown(options=VapourBarrier_Dropdown_options,
+                        id='vapour-barrier-choice',
+                        value=None
+                        ),
+    ], style={'margin': '0 auto', 'justify-content': 'center', 'align-items': 'center', 'max-width': '50vh'}),
     
     dcc.Store(id='final-data-store'),
     dcc.Store(id='layer-boundaries-store'),
@@ -428,9 +514,11 @@ def update_date(date):
     '''Converts date from 'date' to 'value' format'''
     return date
  
+
 @app.callback(
     [Output('final-data-store', 'data'), Output('layer-boundaries-store', 'data')],
     Input('calculate-button', 'n_clicks'),
+    State('vapour-barrier-choice', 'value'),
     State('editable-table', 'data'),
     State('editable-table', 'columns'),
     State('internal_air_speed', 'value'),
@@ -440,15 +528,18 @@ def update_date(date):
     State('station-dropdown', 'value'),
     State('date-picker', 'value')
 )
-def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, internal_humidity, ccode, station, date):
+def calcs(n_clicks, vapour_barrier, data, columns, internal_air_speed, internal_temperature, internal_humidity, ccode, station, date):
     '''Callback which performs all calculations required to produce the diagram'''
     # Create a pandas DataFrame from the data and columns inputs
     df = pd.DataFrame(data, columns=[c['name'] for c in columns])
     df['Thickness'] = pd.to_numeric(df['Thickness'])
     
+    global VapourBarrierData ;
+    if vapour_barrier is not None: permeance = float((VapourBarrierData.loc[VapourBarrierData['FILM TYPE'] == vapour_barrier, "Permeance"]).values[0])
+    else: permeance = None
     thickness = df[columns[2]['id']]
-    k = df[columns[3]['id']]
-    pi = df[columns[4]['id']]
+    conductivity = df[columns[3]['id']]
+    permeability = df[columns[4]['id']]
     
     # Converts chosen date to datetime format
     if date is not None: date = dt.fromisoformat(date)
@@ -463,76 +554,9 @@ def calcs(n_clicks, data, columns, internal_air_speed, internal_temperature, int
     if relevant_weather_data['rhum'] is not None: external_humidity = max(relevant_weather_data['rhum'])
     else: external_humidity=0.9, print("default used")
     
-    
-    # Creating the conditions dataframe :
-    Conditions = pd.DataFrame(
-        [Boundary_Conditions_array(internal_air_speed, internal_temperature, internal_humidity),
-         Boundary_Conditions_array(external_air_speed, external_temperature, external_humidity)],
-        columns=['Convection', 'MassTransfer', 'Temperature', 'RelativeHumidity', 'SatVapPressure', 'VapPressure'],
-        index=['Internal', 'External']
-    )
-    
-    ###! CONSTANT VALUES
-    
-    total_thickness = sum(thickness)
-    # Layer Resistances   
-    R_thermal = [t/k for t, k in zip(thickness, k)]
-    R_vapour = [t/pi for t, pi in zip(thickness, pi)]
-    # Total Thermal Resistance
-    R_thermal_total = Total_resistance(Conditions.Convection['Internal'], R_thermal, Conditions.Convection['External'], 0)
-    # Total Thermal Flow
-    thermal_flow = Total_flow(R_thermal_total, Conditions.Temperature['Internal'], Conditions.Temperature['External']) 
-    
-    # Setting number of ticks and iterations
-    ticks = calculate_ticks(total_thickness)
-    if ticks is None: ticks = 0.001
-
     layer_boundaries_real = [round(sum(thickness[:i]), 5) for i in range(4)]                 # array indicating each layer boundary
-    layer_boundaries_iters = [rounduptoint(sum(thickness[:i])/ticks) for i in range(4)]      # layer boundaries in terms of number of iterations
     
-    ###! VARIABLE EVOLUTIONS
-    
-    ### TEMPERATURE EVOLUTION
-    iterations = rounduptoint(total_thickness/ticks)    # Number of data points used in the plot
-    # Setting initial Temperature value
-    Temperature = [Conditions.Temperature['Internal']-(thermal_flow/Conditions.Convection['Internal'])]
-    # All Temperature Evolution WITHIN THE WALL
-    for i in range(1, iterations):
-        Temperature.append(variable_evolution(Temperature[i-1], thermal_flow, k[determine_layer_num(i, layer_boundaries_iters)-1], ticks))
-    # Final Temperature Value (at outer surface)
-    Temperature.append(Conditions.Temperature['External']+(thermal_flow/Conditions.Convection['External']))
-
-    ### PRESSURE EVOLUTIONS
-    # Initialising pressure arrays
-    pvs_vals = [Conditions.SatVapPressure['Internal']]
-    pv_vals = [Conditions.VapPressure['Internal']]
-
-    ## Calculating vapour flow through the wall:
-    # Total Vapour Resistance
-    R_vapour_total = Total_resistance(Conditions.MassTransfer['Internal'], R_vapour, Conditions.MassTransfer['External'], 0)
-    # Total Vapour Flow 
-    vapour_flow = Total_flow(R_vapour_total, pv_vals[0], Conditions.VapPressure['External'])
-
-    ## Calculating and storing Pressure evolution in arrays
-    for i in range(1, iterations):
-        pvs_vals.append(pvs(Temperature[i]))
-        pv_vals.append(variable_evolution(pv_vals[i-1], vapour_flow, pi[determine_layer_num(i, layer_boundaries_iters)-1], ticks))
-    # Final Pressure Values
-    pvs_vals.append(Conditions.SatVapPressure['External'])
-    pv_vals.append(Conditions.VapPressure['External'])
-    
-    ###! DATAFRAME CONVERSION
-    x_vals = np.arange(0, round(total_thickness+ticks, 5), ticks); 
-    x_vals = np.round(x_vals, 5)
-    Layer_num = [determine_layer_num(x, layer_boundaries_real) for x in x_vals]
-
-    Final_df = pd.DataFrame(
-        data={'Thickness':x_vals,
-            'Temperature': Temperature,
-            'SatVapPressure': pvs_vals,
-            'VapPressure': pv_vals,
-            'Layer Num': [MaterialData.index[i-1] for i in Layer_num]
-            })
+    Final_df = calculations(conductivity, permeability, internal_air_speed, internal_temperature, internal_humidity, external_air_speed, external_temperature, external_humidity, thickness, permeance)
     
     return Final_df.to_dict('records'), layer_boundaries_real
 
@@ -642,147 +666,3 @@ if __name__ == '__main__':
     app.run()
 
 #%%
-###! CALCULATION OF CONSTANT VALUES
-
-
-# ## Total resistances and thermal flow
-
-# # Thermal Resistances  
-# Rth_total = Total_resistance(Conditions.Convection['Internal'], Layer_Props['Rth'], Conditions.Convection['External'], 0)
-# # Total thermal flow
-# thermal_flow = Total_flow(Rth_total, Conditions.Temperature['Internal'], Conditions.Temperature['External']) 
-
-
-
-# ###! TEMPERATURE EVOLUTION
-
-# # Setting number of ticks and iterations
-# Magnitude = np.floor(np.log10(thck_tot))    # determine the order of magnitude
-# ticks = (10**Magnitude)/100;                # assures the graph will always have the correct amount of ticks
-# # ticks = 0.001;                            # manual choice of ticks
-# iterations = rounduptoint(thck_tot/ticks)
-
-# # Arrays containing layer boundaries
-# layer_boundaries_real = [round(sum(thck[:i]), 5) for i in range(n+1)]                 # array indicating each layer boundary
-# layer_boundaries_iters = [rounduptoint(sum(thck[:i])/ticks) for i in range(n+1)]      # layer boundaries in terms of number of iterations
-# # print(layer_boundaries_real)
-# # print(layer_boundaries_iters)
-
-
-# ## Calculating and storing Temperature Evolution in an array *
-
-# # Initial Temperature Value (on inner surface)
-# Temperature = [Conditions.Temperature['Internal']-(thermal_flow/Conditions.Convection['Internal'])]
-# # All Temperature Evolution WITHIN THE WALL
-# for i in range(1, iterations):
-#     Temperature.append(variable_evolution(Temperature[i-1], thermal_flow, Layer_Props.k[f"LAYER {determine_layer_num(i, layer_boundaries_iters)}"], ticks))
-# # Final Temperature Value (at outer surface)
-# Temperature.append(Conditions.Temperature['External']+(thermal_flow/Conditions.Convection['External']))
-
-# ###! PRESSURE EVOLUTIONS
-
-# # Initialising pressure arrays
-# pvs_vals = [Conditions.SatVapPressure['Internal']]
-# pv_vals = [Conditions.VapPressure['Internal']]
-# ## Calculating vapour flow through the wall:
-
-# # print(Total_resistance(Conditions.MassTransfer['Internal'], Layer_Props['Rv'], Conditions.MassTransfer['External'], 0))
-# Rv_total = Total_resistance(Conditions.MassTransfer['Internal'], Layer_Props['Rv'], Conditions.MassTransfer['External'], 0)
-
-# vapour_flow = Total_flow(Rv_total, pv_vals[0], Conditions.VapPressure['External'])
-# ## Calculating and storing Pressure evolution in arrays
-# # Filling arrays with a loop
-# for i in range(1, iterations):
-#     pvs_vals.append(pvs(Temperature[i]))
-#     pv_vals.append(variable_evolution(pv_vals[i-1], vapour_flow, Layer_Props.Permeability[f"LAYER {determine_layer_num(i, layer_boundaries_iters)}"], ticks))
-# # Final Pressure Values
-# pvs_vals.append(Conditions.SatVapPressure['External'])
-# pv_vals.append(Conditions.VapPressure['External'])
-
-# ###! DATAFRAME CONVERSION
-# x_vals = np.arange(0, round(thck_tot+ticks, 5), ticks); 
-# x_vals = np.round(x_vals, 5)
-# Layer_num = [determine_layer_num(x, layer_boundaries_real) for x in x_vals]
-
-# Final_df = pd.DataFrame(
-#     data={'Thickness':x_vals,
-#           'Temperature': Temperature,
-#           'SatVapPressure': pvs_vals,
-#           'VapPressure': pv_vals,
-#           'Material': [MaterialData.index[ID[i-1]] for i in Layer_num]
-#           })
-# Final_df.set_index('Thickness', inplace=True)
-
-# # Final_df.to_csv('3layerexample.csv', index=False)
-
-# # pd.set_option("display.max_rows", None)
-# # print(Final_df)
-
-# ###! FINAL CALCULATIONS
-
-# ## Finding condensation point:
-# condensation_points = [];
-# check = True;
-# for i in range(1, iterations):
-#     if (np.mean(pv_vals[i-1:i]) >= np.mean(pvs_vals[i-1:i])) and (check==True): # checks if pv>pvs in each iteration
-#         condensation_points.append(avg(i-1, i)*ticks)        # stores condensation point in the array
-#         check = False                                       # stops the loop checking once point is located
-#     if (np.mean(pv_vals[i-1:i]) <= np.mean(pvs_vals[i-1:i])): check = True  # allows loop to start checking after first area of condensation
-
-# print ("condenstation point = ", condensation_points)
-
-
-# ###! PLOTTING
-# dfplot(Final_df, layer_boundaries_real)
-# # plt.show()
-
-
-# ###! VAPOUR BARRIER SUGGESTION
-
-# VapourBarrierData = pd.read_csv('projectData/VapourBarrierData.csv', index_col=0)
-# print(VapourBarrierData.columns)
-
-# ## Checks for condensation
-# if len(condensation_points) == 0:
-#     print("It appears there will be no condensation in these conditions")
-# else:
-#     print(f"There is some condensation at {condensation_points} m in your wall!")
-#     print("Here are your choices of Vapour Barriers: \n")
-#     print(VapourBarrierData)
-#     VB_ID = int(input("Please input the ID number: "))
-#     print()
-        
-#     # VB_permeance = VapourBarrierData["Permeance"].iloc[ID[VB_ID]]
-#     VB_permeance = VapourBarrierData.iloc[VB_ID, 0]
-#     print(VapourBarrierData.iloc[VB_ID, 0])
-#     # print(VapourBarrierData["Permeance"].iloc[ID[:,VB_ID]])
-
-#     # Rv_1_new = Layer_Props.Rv['LAYER 1']
-#     # print("Rv_tot = ", Rv_total)
-#     Rv_total_new = Total_resistance(Conditions.MassTransfer['Internal'], Layer_Props['Rv'], Conditions.MassTransfer['External'], VB_permeance)
-#     # print("new Rv_tot = ", Rv_total_new)
-
-#     # pv_vals_new = [Rv_total_new*vapour_flow+Conditions.SatVapPressure['External']]
-#     Rv_VB = 1/VB_permeance
-#     # vapour_flow_VB = Total_flow(Rv_VB, )
-#     vapour_flow_new = Total_flow(Rv_total_new, Conditions.VapPressure['Internal'], Conditions.VapPressure['External'])
-#     # print("pv_i = ", Conditions.VapPressure['Internal'])
-#     # print("vapour flow = ", vapour_flow)
-#     # print("new vapour flow = ", vapour_flow_new)
-#     # print(vapour_flow_new*(1/8.83e-12))
-#     pv_vals_new = [variable_evolution(Conditions.VapPressure['Internal'], vapour_flow_new, VB_permeance, 1)]
-#     # print(pv_vals_new)
-
-#     for i in range(1, iterations):
-#         pv_vals_new.append(variable_evolution(pv_vals_new[i-1], vapour_flow_new, Layer_Props.Permeability[f"LAYER {determine_layer_num(i, layer_boundaries_iters)}"], ticks))
-#     pv_vals_new.append(Conditions.VapPressure['External'])
-
-#     Final_df_with_VB = Final_df.copy()
-
-#     Final_df_with_VB['VapPressure'] = pv_vals_new
-
-#     print(Final_df_with_VB)
-#     dfplot(Final_df_with_VB, layer_boundaries_real)
-#     plt.show()  
-
-
