@@ -15,7 +15,7 @@ Version 0.1: The most basic possible version of the code.
 
 Version 1: Fully functional code with little to no extra functionalities.
 
-  v1.0: Most simple version which still outputs the desired output.
+  v1.0: Most simple version which still returns the desired output.
   - allows user to customize a wall of (maximum 3) layers by their materials and thickness
   - returns a plot with a temperature and a pressure y-axis, which highlights where condensation occurs
 
@@ -48,15 +48,12 @@ v1.4:
     - made separations clearer
   - Reorganised some code
 
-  v1.?: (list of planned features to be added during the v1 phase)
-  - will integrate a choice of a permeable coating to mitigate condensation
-  - will improve the visualisation with labels and/or textures for different materials
-  - improve the LayerData file to make the types of material clearer
-  - improve user interface
+All code after this point was linked to git and versions were no longer uploaded as files.
 
 
-Version 2 (Future version): will build upon the most updated v1; adding extra functionalities to base code
-- use of the 'Meteostat_import_station_data' function included in the project files to be able to determine the validity of the model for different parts of the year for a given location in the world
-- estimate how the materials will be affected by the condensation over time
-- cost analysis
-- try and integrate acoustics? 
+Version 2 : Final Version
+- Full dash app layout
+- Use of weather station data (Meteostat) to test the wall at different points of the year for a given location in the world
+- fully debugged (some problems with US stations as well as stations with limited data)
+- Internal conditions are now modifiable 
+- Maximum of 3 layers (dash editable datatable with a dropdown was near impossible to make dynamic)
